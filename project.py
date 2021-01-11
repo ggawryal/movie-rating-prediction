@@ -64,8 +64,8 @@ class Decision_Tree_Regression:
             return 
 
         j,s = self.find_split_point(Xy)
-        #print("split by x[",j,"] <=",s)
         XyL, XyR = Xy[Xy[:,j] <= s, :], Xy[Xy[:,j] > s, :]
+        #print("split by x[",j,"] <=",s,len(XyL),len(XyR))
         node.set_params(j,s,  Decision_Tree_Regression.TreeNode(),  Decision_Tree_Regression.TreeNode())
         self.fit_recursive(XyL,node.left,depth+1)
         self.fit_recursive(XyR,node.right,depth+1)
@@ -75,6 +75,8 @@ class Decision_Tree_Regression:
         self.fit_recursive(np.append(X,y.reshape(-1,1),axis=1), self.root, 0)
 
     def predict_single(self,x):
+        if(x.ndim != 1):
+            raise RuntimeError("predict single should take single observation")
         node = self.root
         while node.j is not None:
             if x[node.j] <= node.s:
@@ -86,8 +88,57 @@ class Decision_Tree_Regression:
     def predict(self,X):
         return np.array([self.predict_single(x) for x in X])
 
-regr = Decision_Tree_Regression(max_depth=4)
+class Gradient_Boosting_Regression:
+    def __init__(self, iters=100, max_tree_depth=4, eta=0.1, sample_fraction=1.0):
+        """
+        Parameters
+        ----------
+        iters 
+            number of iterations in boosting
+        max_tree_depth 
+            depth of each of decision trees
+        eta gradient 
+            learing rate
+        sample_fraction 
+            fraction of random sample of rows used in each iteration, 
+            1.0 means using whole set of rows, smaller values can be used for stochastic gradient boosting
+        """
+        self.iters = iters
+        self.max_tree_depth = max_tree_depth
+        self.eta = eta
+        self.sample_fraction = sample_fraction
 
+    def update_function(self,f,tree):
+        return lambda x: f(x) + self.eta*tree.predict_single(x)
+
+    def fit(self,X,y):
+        n,m = X.shape[1], X.shape[0]
+        
+        mean_y = sum(y)/len(y)
+        fs = [lambda _ : mean_y] + [None] * self.iters
+
+        for t in range(self.iters):
+            random_indexes = np.random.choice(X.shape[0], max(1,int(m*self.sample_fraction)), replace=False)
+            X2,y2 = X[random_indexes], y[random_indexes]
+            g = np.array([y2[i] - fs[t](X2[i]) for i in range(len(y2))])
+
+            tree = Decision_Tree_Regression(self.max_tree_depth)
+            tree.fit(X2,g)
+            fs[t+1] = self.update_function(fs[t],tree)
+            
+            #y_pred = np.array([fs[t+1](x) for x in X])
+            #print("t =",t,"mse =",mean_squared_error(y_pred,y))
+
+        self.h = fs[-1]
+
+    def predict_single(self,x):
+        return self.h(x)
+
+    def predict(self,X):
+        return np.array([self.predict_single(x) for x in X])
+
+#regr = Decision_Tree_Regression(max_depth=6)
+regr = Gradient_Boosting_Regression(iters=30, max_tree_depth=4,sample_fraction=0.6)
 regr.fit(d_X_train, d_y_train)
 
 d_y_pred = regr.predict(d_X_test)
