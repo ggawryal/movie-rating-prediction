@@ -36,7 +36,7 @@ class Decision_Tree_Regression:
 
     def find_split_point(self,Xy):
         n,m = Xy.shape[1]-1, Xy.shape[0]
-        best = (1e18,0,0)
+        best = (1e18,None,None)
         for j in range(n):
             Xs = Xy[np.argsort(Xy[:,j])]
             
@@ -58,17 +58,23 @@ class Decision_Tree_Regression:
         return (best[1], best[2])
     
     def fit_recursive(self, Xy, node, depth):
-        if len(Xy) == 1 or depth == self.max_depth:
+        leaf = False
+        if len(Xy) <= 5 or depth == self.max_depth:
+            leaf = True
+        else:
+            j,s = self.find_split_point(Xy)
+            if j is None:
+                leaf = True
+            else:
+                XyL, XyR = Xy[Xy[:,j] <= s, :], Xy[Xy[:,j] > s, :]
+                node.set_params(j,s,  Decision_Tree_Regression.TreeNode(),  Decision_Tree_Regression.TreeNode())
+                self.fit_recursive(XyL,node.left,depth+1)
+                self.fit_recursive(XyR,node.right,depth+1)
+        if leaf:
+            assert(len(Xy) > 0)
             node.set_params(None,None,None,None)
             node.c = Xy[:,-1].sum()/len(Xy)
             return 
-
-        j,s = self.find_split_point(Xy)
-        XyL, XyR = Xy[Xy[:,j] <= s, :], Xy[Xy[:,j] > s, :]
-        #print("split by x[",j,"] <=",s,len(XyL),len(XyR))
-        node.set_params(j,s,  Decision_Tree_Regression.TreeNode(),  Decision_Tree_Regression.TreeNode())
-        self.fit_recursive(XyL,node.left,depth+1)
-        self.fit_recursive(XyR,node.right,depth+1)
 
     def fit(self,X,y):
         self.root = Decision_Tree_Regression.TreeNode()
@@ -137,8 +143,44 @@ class Gradient_Boosting_Regression:
     def predict(self,X):
         return np.array([self.predict_single(x) for x in X])
 
+class Random_Forest_Regression:
+    def __init__(self, n_trees, max_depth, bootstrap=True, max_features="all"):
+        self.n_trees = n_trees
+        self.max_depth = max_depth
+        self.bootstrap = bootstrap
+
+        if isinstance(max_features,int):
+            self.n_features = lambda _ : max_features
+        elif max_features == "sqrt":
+            self.n_features = math.sqrt
+        else:
+            max_features = lambda x : x
+
+        self.trees = []
+    
+    def fit(self,X,y):
+        n,m = X.shape[1], X.shape[0]
+        for i in range(self.n_trees):
+            random_columns = np.random.choice(X.shape[1],np.clip(int(self.n_features(X.shape[1])), X.shape[1],X.shape[1]), replace=False)
+            random_rows    = np.random.choice(X.shape[0], X.shape[0], replace=self.bootstrap) #if bootstrap is False, then rows will be only permuted
+            Xs = np.array([X.T[i] if i in random_columns else np.zeros(m) for i in range(n)]).T
+            Xs,ys = Xs[random_rows], y[random_rows]
+            tree = Decision_Tree_Regression(max_depth=self.max_depth)
+            tree.fit(Xs,ys)
+            self.trees.append(tree)
+    
+    def predict_single(self,x):
+        y = 0
+        for tree in self.trees:
+            y += tree.predict_single(x)
+        return y/self.n_trees
+    
+    def predict(self,X):
+        return np.array([self.predict_single(x) for x in X])
+
 #regr = Decision_Tree_Regression(max_depth=6)
-regr = Gradient_Boosting_Regression(iters=30, max_tree_depth=4,sample_fraction=0.6)
+#regr = Gradient_Boosting_Regression(iters=30, max_tree_depth=4,sample_fraction=0.6)
+regr = Random_Forest_Regression(n_trees = 20,max_depth=7,bootstrap=True,max_features="sqrt")
 regr.fit(d_X_train, d_y_train)
 
 d_y_pred = regr.predict(d_X_test)
