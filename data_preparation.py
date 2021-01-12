@@ -29,9 +29,13 @@ def make_dummies_from_list(col, max_classes = -1, make_others_class = False):
         col = col.drop(columns=['other'])
     return col.add_prefix(name+"_")
 
+def count_max_occurences(col,pdSeriesMethod=pd.Series.max):
+    vc = pd.Series(chain(*col.str.lower().str.split(', '))).value_counts()
+    return pdSeriesMethod(col.str.lower().str.split(', ').apply(pd.Series).applymap(lambda x : np.nan if x not in vc else vc[x]),axis=1)
 
 def get_data(save_processed_df = False):
-    df = pd.read_csv("data/IMDB movies.csv")[['year','genre','duration','country','language','budget','reviews_from_users','reviews_from_critics','votes','avg_vote']].dropna()
+    df = pd.read_csv("data/IMDB movies.csv")[['year','actors','director','genre','duration','country','language','budget','avg_vote']].dropna()
+    
     df['year'] = df['year'].apply(pd.to_numeric, errors='coerce').dropna().astype(int)
     df['budget'] = df['budget'].apply(parse_currency)
     df = df[df['budget'].notnull()]
@@ -40,7 +44,15 @@ def get_data(save_processed_df = False):
     df = pd.concat([df, make_dummies_from_list(df['language'],max_classes=10,make_others_class=True)],axis=1).drop(columns=['language'])
     df = pd.concat([df, make_dummies_from_list(df['country'],max_classes=10,make_others_class=True)],axis=1).drop(columns=['country'])
 
+    df['number_of_actors'] = df['actors'].str.count(',').add(1)
+    df['director_total_movies'] = count_max_occurences(df['director'])
+    df['max_total_movies_actor'] = count_max_occurences(df['actors'])
+    df['avg_total_movies_actor'] = count_max_occurences(df['actors'],pd.Series.mean)
+
+    
     cols = df.columns.tolist()
+    cols.remove('actors')
+    cols.remove('director')
     cols.remove('avg_vote')
     cols.append('avg_vote')
     df = df[cols]
