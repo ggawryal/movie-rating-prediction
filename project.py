@@ -5,16 +5,14 @@ import sklearn.preprocessing
 
 import data_preparation
 
-#data = data_preparation.get_data(True)
-data = data_preparation.get_data_from_tmp()
+data = data_preparation.get_data(0.6,True)
+#data = data_preparation.get_data_from_tmp()
 
 data_train, data_test = data[:-5000], data[-5000:]
 
 scaler = sklearn.preprocessing.StandardScaler()
 data_train = scaler.fit_transform(data_train)
 data_test  = scaler.transform(data_test)
-
-
 d_X_train = data_train[:,:-1]
 d_y_train = data_train[:,-1]
 
@@ -91,6 +89,7 @@ class Decision_Tree_Regression:
             else:
                 XyL, XyR = Xy[Xy[:,j] <= s, :], Xy[Xy[:,j] > s, :]
                 node.set_params(j,s,  Decision_Tree_Regression.TreeNode(),  Decision_Tree_Regression.TreeNode())
+                #print('split by '+feature_names[j]+' <= ',s,len(XyL),len(XyR))
                 self.fit_recursive(XyL,node.left,depth+1)
                 self.fit_recursive(XyR,node.right,depth+1)
         if leaf:
