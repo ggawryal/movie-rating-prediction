@@ -1,9 +1,7 @@
 import numpy as np
 import math
-from functools import partial
 from sklearn.metrics import mean_squared_error, r2_score
 import sklearn.preprocessing 
-
 
 import data_preparation
 
@@ -22,6 +20,31 @@ d_y_train = data_train[:,-1]
 
 d_X_test = data_test[:,:-1]
 d_y_test = data_test[:,-1]
+
+#Kernel version of ridge regression
+class LinearRegression:
+    def __init__(self, C=1.0, kernel="linear", gaussian_gamma=1, poly_degree=3, poly_const=1):
+        #kernel should be either linear (default), gaussian or polynomial
+        self.C = C
+        self.make_kernel_matrix = lambda A,B: A @ B.T
+
+        if kernel == "gaussian":
+            self.make_kernel_matrix = lambda A,B: np.exp(-gaussian_gamma*(
+                -2*A@B.T + np.tile((A**2).sum(axis=1).reshape(-1,1), (1,B.shape[0])) + np.tile((B**2).sum(axis=1), (A.shape[0],1))
+            ))
+
+        elif kernel == "polynomial":
+            self.make_kernel_matrix = lambda A,B: (A @ B.T + poly_const)**poly_degree
+
+    def fit(self,X,y):
+        n,m = X.shape[1], X.shape[0] 
+        K = self.make_kernel_matrix(X,X)
+
+        self.w = np.linalg.solve(K + self.C*np.identity(m), y)
+        self.X = X
+    
+    def predict(self,x):
+        return self.make_kernel_matrix(x,self.X) @ self.w
 
 class Decision_Tree_Regression:
     class TreeNode:
@@ -178,9 +201,10 @@ class Random_Forest_Regression:
     def predict(self,X):
         return np.array([self.predict_single(x) for x in X])
 
+regr = LinearRegression(C=0.5,gaussian_gamma=0.15,kernel="gaussian")
 #regr = Decision_Tree_Regression(max_depth=6)
 #regr = Gradient_Boosting_Regression(iters=30, max_tree_depth=4,sample_fraction=0.6)
-regr = Random_Forest_Regression(n_trees = 20,max_depth=7,bootstrap=True,max_features="sqrt")
+#regr = Random_Forest_Regression(n_trees = 20,max_depth=7,bootstrap=True,max_features="sqrt")
 regr.fit(d_X_train, d_y_train)
 
 d_y_pred = regr.predict(d_X_test)
@@ -189,5 +213,4 @@ d_y_pred_tr = regr.predict(d_X_train)
 print('MSE on train: %.2f' % mean_squared_error(d_y_train, d_y_pred_tr))
 print('MSE on test: %.2f' % mean_squared_error(d_y_test, d_y_pred))
 print('R2: %.2f'     % r2_score(d_y_test, d_y_pred))
-
 
