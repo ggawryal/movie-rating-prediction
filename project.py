@@ -5,10 +5,10 @@ import sklearn.preprocessing
 
 import data_preparation
 
-data = data_preparation.get_data(0.6,True)
-#data = data_preparation.get_data_from_tmp()
-
-data_train, data_test = data[:-5000], data[-5000:]
+data_train, data_test = data_preparation.get_data(0.7,save_to_file=True)
+#data_train, data_test = data_preparation.get_data_from_tmp()
+np.random.shuffle(data_test)
+#data_val,data_test = data_test[:len(data_test)//2], data_test[len(data_test)//2:]
 
 scaler = sklearn.preprocessing.StandardScaler()
 data_train = scaler.fit_transform(data_train)
@@ -71,7 +71,7 @@ class Decision_Tree_Regression:
                 if Xs[i-1][j] == Xs[i][j]:
                     continue
                 s = (Xs[i-1][j] + Xs[i][j])/2
-
+    
                 c1,c2 = sumL/i, sumR/(m-i)
                 J = sumL2 - 2*c1*sumL + i*c1*c1 + sumR2 - 2*c2*sumR + (m-i)*c2*c2
                 best = min(best,(J,j,s))
@@ -200,8 +200,8 @@ class Random_Forest_Regression:
     def predict(self,X):
         return np.array([self.predict_single(x) for x in X])
 
-regr = LinearRegression(C=0.5,gaussian_gamma=0.15,kernel="gaussian")
-#regr = Decision_Tree_Regression(max_depth=6)
+#regr = LinearRegression(C=1)
+regr = Decision_Tree_Regression(max_depth=6)
 #regr = Gradient_Boosting_Regression(iters=30, max_tree_depth=4,sample_fraction=0.6)
 #regr = Random_Forest_Regression(n_trees = 20,max_depth=7,bootstrap=True,max_features="sqrt")
 regr.fit(d_X_train, d_y_train)
