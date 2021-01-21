@@ -14,7 +14,7 @@ def move_column_to_end(df, col):
     cols = df.columns.tolist()
     cols.remove(col)
     cols.append(col)
-    return df[cols]
+    return df[cols].copy()
 
 
 #change most popluar currencies to dollars and convert to int
@@ -27,94 +27,130 @@ def parse_currency(s):
             return int(int(re.sub(r'\D+','',s))*v)
     return None
 
-def make_dummies_from_list(col,  train_set_size, max_classes = -1, make_others_class = False):
-    name = col.name
-    
-    counts = pd.Series(chain(*col.iloc[:train_set_size].str.lower().str.split(', '))).value_counts()
-    lim = -1
-    if max_classes != -1 and max_classes+1 < len(counts):
-        lim = counts[max_classes]
-    
-    col = pd.get_dummies(col.str.lower().str.split(', ').apply(pd.Series).applymap(lambda x : x if x in counts and counts[x] > lim else 'other').stack()).sum(level=0)
-    if make_others_class:
-        col['other'] = col['other'].apply(lambda x: min(1,x))
-    else:
-        col = col.drop(columns=['other'])
-    return col.add_prefix(name+"_")
+class One_Hot_Encoder:
+    def __init__(self, max_classes=-1):
+        self.max_classes = max_classes
 
+    def fit(self, df_train, col):
+        counts = pd.Series(chain(*df_train[col].str.lower().str.split(', '))).value_counts()
 
-def target_encoding_leave_out1(df, col, y, alpha, train_set_size):
-    """
-    For each observation and selected categorical feature col calculate mean of all other observations in trainig set having same value.
-    If observation have multiple values from this feature (which are separeated by comma in df[col]), then calculate mean of these.
-    """
-    mask = [i < train_set_size for i in range(len(df))]
-    counts = pd.Series(chain(*df[col][mask].str.lower().str.split(', '))).value_counts()
-    means = pd.Series(index=counts.index, data=[df[mask][df[col][mask].str.lower().str.contains(name)][y].mean() for name in counts.index])
-
-    mean_all = df[y][mask].mean()
-
-    vs = []
-    for is_in_train, cell, y_val in zip(mask,df[col],df[y]):
-        v = 0
-        for word in cell.split(', '):
-            word = word.lower()
-            if is_in_train:
-                if counts[word] > 1:
-                    others_mean = ((means[word]*counts[word])-y_val)/(counts[word]-1)
-                    v += ((counts[word]-1) * others_mean + alpha * mean_all)/(counts[word]-1 + alpha)
-                else:
-                    v += mean_all
-            else:
-                if word in counts:
-                    v += (counts[word] * means[word] + alpha * mean_all)/(counts[word] + alpha)
-                else:
-                    v += mean_all
+        if self.max_classes == -1 or self.max_classes >= len(counts):
+            self.max_classes = len(counts)
         
-        vs.append(v / len(cell.split(', ')))
+        self.classes = counts.index.tolist()[:self.max_classes]
+        
+    def transform(self, df, col):
+        for x in self.classes:
+            df[col+"_"+x] = df[col].str.lower().str.contains(x,regex=False).astype(float)
+        return df
 
-    df[col+"_target"] = vs
+class Count_Mean_Statistics:
+    def __init__(self, alpha, avg_func="mean"):
+        self.alpha = alpha
+        self.avg_func = avg_func
 
-def target_encoding_k_fold(df, col, y, alpha, train_set_size, k=5):
-    #first, make target encoding of test set, which is the same as in leave out one target encoding (using whole training set)
-    target_encoding_leave_out1(df,col,y,alpha,train_set_size)
-    df = move_column_to_end(df,y)
-    df.insert(len(df.columns)-1, col+'_k_folds_target', df[col+"_target"])
-    df = df.drop(columns=[col+'_target'])
+    def fit(self, df_train, col, y):
+        self.counts = pd.Series(chain(*df_train[col].str.lower().str.split(', '))).value_counts()
+        self.means = pd.Series(index=self.counts.index, data=[df_train[df_train[col].str.lower().str.contains(name,regex=False)][y].mean() for name in self.counts.index])
+        self.mean_all = df_train[y].mean()
 
-
-    #then, encode each group in train set using counts and means from other folds 
-    for group in range(k):
-        group_bounds = (group*train_set_size//k, (group+1)*train_set_size//k)
-        out_of_group = [i < group_bounds[0] or (i >= group_bounds[1] and i < train_set_size) for i in range(len(df))]
-        counts = pd.Series(chain(*df.iloc[out_of_group][col].str.lower().str.split(', '))).value_counts()
-        means = pd.Series(index=counts.index, 
-            data=[df.iloc[out_of_group,-1] [df.iloc[out_of_group][col].str.lower().str.contains(name)].mean() for name in counts.index])
-
-        mean_all_others = df.iloc[out_of_group,-1].mean()
+    def transform_test(self, df, col,col_suffix):
+        acc = (lambda x,y: x+y) if self.avg_func == "mean" else max
         vs = []
-
-        for cell in df.iloc[group_bounds[0] : group_bounds[1]][col]:
-            v = 0.0
+        for cell in df[col]:
+            v = 0
             for word in cell.split(', '):
                 word = word.lower()
-                if word in counts:
-                    v += (counts[word] * means[word] + alpha * mean_all_others)/(counts[word] + alpha)
+                if word in self.counts:
+                    v = acc(v, (self.counts[word] * self.means[word] + self.alpha * self.mean_all)/(self.counts[word] + self.alpha))
                 else:
-                    v += mean_all_others
-            vs.append(v/len(cell.split(', ')))
+                    v = acc(v, self.mean_all)
 
-        df.iloc[group_bounds[0] : group_bounds[1],-2] = vs 
+            if self.avg_func == "mean":
+                v /= len(cell.split(', '))
+            vs.append(v)
 
-def count_max_occurences(col, train_set_size, pdSeriesMethod=pd.Series.max):
-    vc = pd.Series(chain(*col.iloc[:train_set_size].str.lower().str.split(', '))).value_counts()
-    return pdSeriesMethod(col.str.lower().str.split(', ').apply(pd.Series).applymap(lambda x : 0 if x not in vc else vc[x]),axis=1)
+        df[col+col_suffix] = vs
+        return df
+
+class Target_Encoder_Leave_Out1:
+    def __init__(self, alpha, avg_func="mean"):
+        self.alpha = alpha
+        self.avg_func = avg_func
+        self.cms = Count_Mean_Statistics(alpha,avg_func)
+
+    def fit_transform_train(self, df_train, col, y):
+        df = move_column_to_end(df_train,y)
+        self.cms.fit(df, col, y)
+
+        acc = (lambda x,y: x+y) if self.avg_func == "mean" else max
+
+        vs = []
+        for cell, y_val in zip(df[col],df[y]):
+            v = 0
+            for word in cell.split(', '):
+                word = word.lower()
+                if self.cms.counts[word] > 1:
+                    others_mean = ((self.cms.means[word]*self.cms.counts[word])-y_val)/(self.cms.counts[word]-1)
+                    v = acc(v, ((self.cms.counts[word]-1) * others_mean + self.alpha * self.cms.mean_all)/(self.cms.counts[word]-1 + self.alpha))
+                else:
+                    v = acc(v, self.cms.mean_all)
+
+            if self.avg_func == "mean":
+                v /= len(cell.split(', '))
+            vs.append(v)
+
+        df[col+"_target"] = vs
+        return df
+
+    def fit_transform_both(self, df, col, y, train_set_size):
+        df_train = df.iloc[:train_set_size].copy()
+        df_test  = df.iloc[train_set_size:].copy()
+
+        df_train = self.fit_transform_train(df_train,col,y)
+        df_test =  self.cms.transform_test(df_test,col,'_target')
+        return pd.concat((df_train, df_test))
+
+class Target_Encoder_K_Fold:
+    def __init__(self, alpha,k, avg_func="mean"):
+        self.alpha = alpha
+        self.avg_func = avg_func
+        self.k = k
+        self.cms = Count_Mean_Statistics(alpha,avg_func)
+    
+    def fit_transform_train(self, df, col, y):
+        self.cms.fit(df,col,y)
+        M = len(df)
+        df[col+'_k_folds_target'] = [0.0]*M
+        df = move_column_to_end(df,y)
+
+        #then, encode each group in train set using counts and means from other folds 
+        for group in range(self.k):
+            group_bounds = (group*M//self.k, (group+1)*M//self.k)
+            out_of_group = [i < group_bounds[0] or i >= group_bounds[1] for i in range(M)]
+
+            c = Count_Mean_Statistics(alpha=self.alpha, avg_func=self.avg_func)
+            c.fit(df.iloc[out_of_group],col,y)
+
+            cp = c.transform_test(df.iloc[group_bounds[0] : group_bounds[1]].copy(),col,'_k_folds_target')
+            df.iloc[group_bounds[0] : group_bounds[1],-2] = cp[col+'_k_folds_target'] 
+
+        return df
+
+    def fit_transform_both(self, df, col, y, train_set_size):
+        df_train = df.iloc[:train_set_size].copy()
+        df_test  = df.iloc[train_set_size:].copy()
+
+        df_train = self.fit_transform_train(df_train,col,y)
+        df_test =  self.cms.transform_test(df_test,col,'_k_folds_target')
+        return pd.concat((df_train, df_test))
+        
 
 def stem_description(text):
     ps = PorterStemmer()
     return ', '.join(filter(lambda x : len(x) >= 4, set(re.sub(r'[^a-z]', '', ps.stem(word.lower())) for word in word_tokenize(text))))
 
-def get_data(train_set_fraction, target_encoding=False, save_to_file = False):
+def get_data(train_set_fraction, save_to_file = False,filename_suffix='', test_set_fraction = None):
     df = pd.read_csv("data/IMDB movies.csv")[['year','actors','director','genre','duration','country','language','budget','avg_vote','description']].dropna()
     df['year'] = df['year'].apply(pd.to_numeric, errors='coerce').dropna().astype(int)
     df['budget'] = df['budget'].apply(parse_currency)
@@ -124,29 +160,39 @@ def get_data(train_set_fraction, target_encoding=False, save_to_file = False):
     df = df.sample(frac=1) #shuffle
     train_set_size = int(train_set_fraction*len(df))
 
-    df = pd.concat([df, make_dummies_from_list(df['genre'],train_set_size=train_set_size)],axis=1).drop(columns=['genre'])
-    df = pd.concat([df, make_dummies_from_list(df['language'],train_set_size=train_set_size, max_classes=10,make_others_class=True)],axis=1).drop(columns=['language'])
-    df = pd.concat([df, make_dummies_from_list(df['country'],train_set_size=train_set_size, max_classes=10,make_others_class=True)],axis=1).drop(columns=['country'])
+    if test_set_fraction is not None and train_set_fraction + test_set_fraction < 1:
+        df = df.iloc[:int((train_set_fraction + test_set_fraction)*len(df))]    
+    
+    genre_encoder = One_Hot_Encoder()
+    genre_encoder.fit(df.iloc[:train_set_size],'genre')
+    df = genre_encoder.transform(df,'genre')
 
-    target_encoding_leave_out1(df,'director','avg_vote', alpha=10.0,train_set_size=train_set_size)
-    target_encoding_leave_out1(df,'actors','avg_vote', alpha=10.0,train_set_size=train_set_size)
-    target_encoding_k_fold(df,'description','avg_vote',alpha=5.0,train_set_size=train_set_size,k=3)
+
+    lang_encoder = Target_Encoder_K_Fold(alpha=10,k=5)
+    df = lang_encoder.fit_transform_both(df,'language','avg_vote',train_set_size)
+
+    country_encoder = Target_Encoder_K_Fold(alpha=10,k=5)
+    df = country_encoder.fit_transform_both(df,'country','avg_vote',train_set_size)
+
+    description_encoder = Target_Encoder_K_Fold(alpha=5,k=5,avg_func="max")
+    df = description_encoder.fit_transform_both(df,'description','avg_vote',train_set_size)
+
+    director_encoder = Target_Encoder_Leave_Out1(alpha=10)
+    df = director_encoder.fit_transform_both(df,'director','avg_vote', train_set_size)
+
+    actors_encoder = Target_Encoder_Leave_Out1(alpha=5)
+    df = actors_encoder.fit_transform_both(df,'actors','avg_vote', train_set_size)
+
 
     df['number_of_actors'] = df['actors'].str.count(',').add(1)
-    df['director_total_movies'] = count_max_occurences(df['director'],train_set_size=train_set_size)
-    df['max_total_movies_actor'] = count_max_occurences(df['actors'],train_set_size=train_set_size)
-    df['avg_total_movies_actor'] = count_max_occurences(df['actors'],train_set_size=train_set_size, pdSeriesMethod=pd.Series.mean)
-
-    
     df = move_column_to_end(df,'avg_vote')
-    df = df.drop(columns=['description', 'actors', 'director'])
+    df = df.drop(columns=['description', 'actors', 'director','genre','language','country'])
 
     if save_to_file:
-        df.iloc[:train_set_size].to_csv('frame_train.tmp',index=False)
-        df.iloc[train_set_size:].to_csv('frame_test.tmp',index=False)
+        df.iloc[:train_set_size].to_csv('frame_train'+filename_suffix+'.tmp',index=False)
+        df.iloc[train_set_size:].to_csv('frame_test'+filename_suffix+'.tmp',index=False)
     return df.iloc[:train_set_size].to_numpy(), df.iloc[train_set_size:].to_numpy()
 
-def get_data_from_tmp():
-    print(pd.read_csv('frame_train.tmp').columns.tolist())
-    return pd.read_csv('frame_train.tmp').to_numpy(), pd.read_csv('frame_test.tmp').to_numpy(), 
+def get_data_from_tmp(filename_suffix=''):
+    return pd.read_csv('frames/frame_train'+filename_suffix+'.tmp').to_numpy(), pd.read_csv('frames/frame_test'+filename_suffix+'.tmp').to_numpy(), 
 

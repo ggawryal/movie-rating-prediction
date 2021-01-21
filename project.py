@@ -1,23 +1,29 @@
 import numpy as np
 import math
 from sklearn.metrics import mean_squared_error, r2_score
-import sklearn.preprocessing 
-from sklearn.ensemble import GradientBoostingRegressor
 import data_preparation
 
-#data_train, data_test = data_preparation.get_data(0.7,save_to_file=True)
-data_train, data_test = data_preparation.get_data_from_tmp()
-np.random.shuffle(data_test)
-#data_val,data_test = data_test[:len(data_test)//2], data_test[len(data_test)//2:]
+np.random.seed(4325534)
+data_train_org, data_test_org = data_preparation.get_data(0.7,save_to_file=False, test_set_fraction=0.3)
 
-scaler = sklearn.preprocessing.StandardScaler()
-data_train = scaler.fit_transform(data_train)
-data_test  = scaler.transform(data_test)
-d_X_train = data_train[:,:-1]
-d_y_train = data_train[:,-1]
+class Scaler:
+    def fit_transform(self,Xy_train):
+        self.mean, self.stddev = [],[]
+        for column in Xy_train.T:
+            self.mean.append(sum(column)/len(column))
+            self.stddev.append((sum(column**2)/len(column) - self.mean[-1]**2))
+            if self.stddev[-1] >= 0:
+                self.stddev[-1] = np.sqrt(self.stddev[-1])
+            if self.stddev[-1] < 1e-6 or np.isnan(self.stddev[-1]):
+                self.stddev[-1] = 1
+        return self.transform(Xy_train)
+    
+    def transform(self, Xy):
+        return np.array([(row - self.mean)/self.stddev for row in Xy])
 
-d_X_test = data_test[:,:-1]
-d_y_test = data_test[:,-1]
+    def inverse_transform_column(self, col, i):
+        return col*self.stddev[i]+self.mean[i] 
+
 
 #Kernel version of ridge regression
 class LinearRegression:
@@ -31,7 +37,7 @@ class LinearRegression:
                 -2*A@B.T + np.tile((A**2).sum(axis=1).reshape(-1,1), (1,B.shape[0])) + np.tile((B**2).sum(axis=1), (A.shape[0],1))
             ))
 
-        elif kernel == "polynomial":
+        elif kernel == "polynomial" or kernel == "poly":
             self.make_kernel_matrix = lambda A,B: (A @ B.T + poly_const)**poly_degree
 
     def fit(self,X,y):
@@ -79,11 +85,9 @@ class Decision_Tree_Regression:
                 if Xs[i-1][j] == Xs[i][j]:
                     continue
                 s = (Xs[i-1][j] + Xs[i][j])/2
-    
                 c1,c2 = sumL/i, sumR/(m-i)
                 J = sumL2 - 2*c1*sumL + i*c1*c1 + sumR2 - 2*c2*sumR + (m-i)*c2*c2
                 best = min(best,(J,j,s))
-
         return (best[1], best[2])
     
     def fit_recursive(self, Xy, node, depth, ignored_last_features_n):
@@ -97,7 +101,6 @@ class Decision_Tree_Regression:
             else:
                 XyL, XyR = Xy[Xy[:,j] <= s, :], Xy[Xy[:,j] > s, :]
                 node.set_params(j,s,  Decision_Tree_Regression.TreeNode(),  Decision_Tree_Regression.TreeNode())
-                #print('split by '+feature_names[j]+' <= ',s,len(XyL),len(XyR))
                 self.fit_recursive(XyL,node.left,depth+1,ignored_last_features_n)
                 self.fit_recursive(XyR,node.right,depth+1,ignored_last_features_n)
         if leaf:
@@ -237,18 +240,48 @@ class Random_Forest_Regression:
     def predict(self,X):
         return np.array([self.predict_single(x) for x in X])
 
-#regr = LinearRegression(C=1)
-#regr = Decision_Tree_Regression(max_depth=6)
-regr = Gradient_Boosting_Regression(iters=30, max_tree_depth=4, sample_fraction=0.6, loss="huber",huber_alpha_quantile=0.8)
-#regr = Gradient_Boosting_Regression(iters=30, max_tree_depth=4, sample_fraction=0.6, loss="L1",huber_alpha_quantile=0.1)
-#regr = Random_Forest_Regression(n_trees = 50,max_depth=4,bootstrap=True,max_features="sqrt")
-#regr.fit(d_X_train, d_y_train)
-regr.fit(d_X_train, d_y_train)
-d_y_pred = regr.predict(d_X_test)
-d_y_pred_tr = regr.predict(d_X_train)
 
-print('MSE on train: %.2f' % mean_squared_error(d_y_train, d_y_pred_tr))
-print('MSE on test: %.2f' % mean_squared_error(d_y_test, d_y_pred))
-print('R2: %.2f'     % r2_score(d_y_test, d_y_pred))
+def outliers_fraction(y_pred, y, c):
+    return (np.abs(y-y_pred) > c).sum()/len(y_pred)
 
-g = GradientBoostingRegressor(loss="huber")
+
+
+for model,name in (
+    (Gradient_Boosting_Regression(iters=30, max_tree_depth=4, sample_fraction=0.6, loss="L2"),"GB L2"),
+    (Gradient_Boosting_Regression(iters=100, max_tree_depth=5, sample_fraction=0.6,eta=0.05, loss="huber",huber_alpha_quantile=0.8),"GB huber"),
+    (LinearRegression(C=1),"LR"),
+    (LinearRegression(C=15000*10,kernel="polynomial",poly_degree=3,poly_const=1),"LR poly kernel"),
+    (LinearRegression(C=1,kernel="gaussian",gaussian_gamma=0.009), "LR gaussian kernel"),
+    (Decision_Tree_Regression(max_depth=6),"Decision tree"),
+    (Random_Forest_Regression(n_trees = 50,max_depth=4,bootstrap=True,max_features="sqrt"),"Random Forest")):
+
+
+    data_train, data_test = np.copy(data_train_org), np.copy(data_test_org)
+    
+    np.random.shuffle(data_test)
+    data_val,data_test = data_test[:len(data_test)//2], data_test[len(data_test)//2:]
+
+    scaler = Scaler()
+
+    data_train = scaler.fit_transform(data_train)
+    data_val  = scaler.transform(np.copy(data_val))
+    data_test  = scaler.transform(np.copy(data_test))
+    d_X_train = data_train[:,:-1]
+    d_y_train = data_train[:,-1]
+
+    d_X_test = data_test[:,:-1]
+    d_y_test = data_test[:,-1]
+
+    d_X_val = data_val[:,:-1]
+    d_y_val = data_val[:,-1]
+
+            
+    model.fit(d_X_train, d_y_train)
+    d_y_pred = model.predict(d_X_val)
+    d_y_pred_tr = model.predict(d_X_train)
+
+    train_set_fraction=1
+    print(train_set_fraction,name,'MSE on train: %.2f' % mean_squared_error(d_y_train, d_y_pred_tr))
+    print(train_set_fraction,name,'MSE on test: %.2f' % mean_squared_error(d_y_val, d_y_pred))
+    print(train_set_fraction,name,'Outliers fraction 1: %.2f' % outliers_fraction(d_y_val, d_y_pred,0.5))
+    print(train_set_fraction,name,'R2: %.2f'     % r2_score(d_y_val, d_y_pred))
