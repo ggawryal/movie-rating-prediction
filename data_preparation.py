@@ -189,8 +189,8 @@ def get_data(train_set_fraction, save_to_file = False,filename_suffix='', test_s
     df = df.drop(columns=['description', 'actors', 'director','genre','language','country'])
 
     if save_to_file:
-        df.iloc[:train_set_size].to_csv('frame_train'+filename_suffix+'.tmp',index=False)
-        df.iloc[train_set_size:].to_csv('frame_test'+filename_suffix+'.tmp',index=False)
+        df.iloc[:train_set_size].to_csv('frames/frame_train'+filename_suffix+'.tmp',index=False)
+        df.iloc[train_set_size:].to_csv('frames/frame_test'+filename_suffix+'.tmp',index=False)
     return df.iloc[:train_set_size].to_numpy(), df.iloc[train_set_size:].to_numpy()
 
 def get_data_from_tmp(filename_suffix=''):

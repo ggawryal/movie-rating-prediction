@@ -1,10 +1,12 @@
 import numpy as np
 import math
-from sklearn.metrics import mean_squared_error, r2_score
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 import data_preparation
 
 np.random.seed(4325534)
-data_train_org, data_test_org = data_preparation.get_data(0.7,save_to_file=False, test_set_fraction=0.3)
+#data_train_org, data_test_org = data_preparation.get_data(0.1,save_to_file=False, test_set_fraction=0.3)
 
 class Scaler:
     def fit_transform(self,Xy_train):
@@ -240,48 +242,82 @@ class Random_Forest_Regression:
     def predict(self,X):
         return np.array([self.predict_single(x) for x in X])
 
-
-def outliers_fraction(y_pred, y, c):
+def outliers_fraction(y, y_pred, c):
     return (np.abs(y-y_pred) > c).sum()/len(y_pred)
 
+def mse(y, y_pred):
+    return ((y_pred-y)**2).mean()
+
+def r2_score(y, y_pred):
+    y_mean = y.mean()
+    s1 = sum((y-y_mean)**2)
+    s2 = sum((y-y_pred)**2)
+    return 1-s2/s1
+
+sns.set()
+fig, ax = plt.subplots(1,2)
+ITERS = 5
 
 
+kde_plots = []
+legend_labels = []
 for model,name in (
     (Gradient_Boosting_Regression(iters=30, max_tree_depth=4, sample_fraction=0.6, loss="L2"),"GB L2"),
     (Gradient_Boosting_Regression(iters=100, max_tree_depth=5, sample_fraction=0.6,eta=0.05, loss="huber",huber_alpha_quantile=0.8),"GB huber"),
     (LinearRegression(C=1),"LR"),
     (LinearRegression(C=15000*10,kernel="polynomial",poly_degree=3,poly_const=1),"LR poly kernel"),
     (LinearRegression(C=1,kernel="gaussian",gaussian_gamma=0.009), "LR gaussian kernel"),
-    (Decision_Tree_Regression(max_depth=6),"Decision tree"),
+    (Decision_Tree_Regression(max_depth=8),"Decision tree"),
     (Random_Forest_Regression(n_trees = 50,max_depth=4,bootstrap=True,max_features="sqrt"),"Random Forest")):
-
-
-    data_train, data_test = np.copy(data_train_org), np.copy(data_test_org)
     
-    np.random.shuffle(data_test)
-    data_val,data_test = data_test[:len(data_test)//2], data_test[len(data_test)//2:]
+    for train_set_fraction in [0.001,0.003,0.01,0.03,0.1,0.2,0.4,0.625,1]:
+        outliers_X = np.linspace(0,2,100)
+        train_mse, test_mse, r2, outliers_Y = 0.,0.,0.,np.zeros(len(outliers_X))
+        for it in range(ITERS):
+            data_train_org, data_test_org = data_preparation.get_data_from_tmp(filename_suffix=str(it)+"_"+str(train_set_fraction))
+            data_train, data_test = np.copy(data_train_org), np.copy(data_test_org)
+    
+            np.random.shuffle(data_test)
+            data_val,data_test = data_test[:len(data_test)//2], data_test[len(data_test)//2:]
 
-    scaler = Scaler()
+            scaler = Scaler()
 
-    data_train = scaler.fit_transform(data_train)
-    data_val  = scaler.transform(np.copy(data_val))
-    data_test  = scaler.transform(np.copy(data_test))
-    d_X_train = data_train[:,:-1]
-    d_y_train = data_train[:,-1]
+            data_train = scaler.fit_transform(data_train)
+            data_val  = scaler.transform(np.copy(data_val))
+            data_test  = scaler.transform(np.copy(data_test))
+            d_X_train = data_train[:,:-1]
+            d_y_train = data_train[:,-1]
 
-    d_X_test = data_test[:,:-1]
-    d_y_test = data_test[:,-1]
+            d_X_test = data_test[:,:-1]
+            d_y_test = data_test[:,-1]
 
-    d_X_val = data_val[:,:-1]
-    d_y_val = data_val[:,-1]
+            d_X_val = data_val[:,:-1]
+            d_y_val = data_val[:,-1]
 
-            
-    model.fit(d_X_train, d_y_train)
-    d_y_pred = model.predict(d_X_val)
-    d_y_pred_tr = model.predict(d_X_train)
+                    
+            model.fit(d_X_train, d_y_train)
+            d_y_pred = model.predict(d_X_val)
+            d_y_pred_tr = model.predict(d_X_train)
 
-    train_set_fraction=1
-    print(train_set_fraction,name,'MSE on train: %.2f' % mean_squared_error(d_y_train, d_y_pred_tr))
-    print(train_set_fraction,name,'MSE on test: %.2f' % mean_squared_error(d_y_val, d_y_pred))
-    print(train_set_fraction,name,'Outliers fraction 1: %.2f' % outliers_fraction(d_y_val, d_y_pred,0.5))
-    print(train_set_fraction,name,'R2: %.2f'     % r2_score(d_y_val, d_y_pred))
+            train_mse += mse(d_y_train, d_y_pred_tr)/ITERS
+            test_mse  += mse(d_y_val, d_y_pred)/ITERS
+            r2 += r2_score(d_y_val, d_y_pred)/ITERS
+            if train_set_fraction == 1:
+                outliers_Y += np.array([outliers_fraction(d_y_val, d_y_pred,x) for x in outliers_X])/ITERS
+                if it == 0:
+                    if len(kde_plots) == 0:
+                        sns.histplot(data=scaler.inverse_transform_column(np.array(d_y_val),-1),stat="density",kde=True,bins=10,binrange=(0,10),color="black",ax=ax[1])
+                    kde_plots.append(sns.kdeplot(data=scaler.inverse_transform_column(np.array(d_y_pred),-1), ax=ax[1],palette=sns.color_palette()))     
+                    legend_labels.append(name)
+
+        print(train_set_fraction,name,'MSE on train: %.2f' % train_mse)
+        print(train_set_fraction,name,'MSE on test: %.2f' % test_mse)
+        print(train_set_fraction,name,'R2: %.2f'     % r2)
+
+        if train_set_fraction == 1:
+            ax[0].plot(outliers_X, outliers_Y)
+
+
+ax[0].legend(labels=legend_labels)
+ax[1].legend(labels=['y']+legend_labels)
+plt.show()
