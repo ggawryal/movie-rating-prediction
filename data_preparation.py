@@ -2,12 +2,15 @@ import numpy as np
 import pandas as pd
 from itertools import chain
 import re
+
+import nltk
 from nltk.tokenize import word_tokenize
 from nltk.stem import PorterStemmer
 from string import punctuation
 
-import nltk
-nltk.download('punkt')
+import config
+
+np.random.seed(config.seed)
 
 
 def move_column_to_end(df, col):
@@ -155,6 +158,8 @@ def get_data(train_set_fraction, save_to_file = False,filename_suffix='', test_s
     df['year'] = df['year'].apply(pd.to_numeric, errors='coerce').dropna().astype(int)
     df['budget'] = df['budget'].apply(parse_currency)
     df = df[df['budget'].notnull()]
+
+    nltk.download('punkt')
     df['description'] = df['description'].apply(stem_description)
 
     df = df.sample(frac=1) #shuffle
@@ -189,10 +194,27 @@ def get_data(train_set_fraction, save_to_file = False,filename_suffix='', test_s
     df = df.drop(columns=['description', 'actors', 'director','genre','language','country'])
 
     if save_to_file:
-        df.iloc[:train_set_size].to_csv('frames/frame_train'+filename_suffix+'.tmp',index=False)
-        df.iloc[train_set_size:].to_csv('frames/frame_test'+filename_suffix+'.tmp',index=False)
+        df.iloc[:train_set_size].to_csv('frames/frame_train'+filename_suffix+'.dataframe',index=False)
+        df.iloc[train_set_size:].to_csv('frames/frame_test'+filename_suffix+'.dataframe',index=False)
     return df.iloc[:train_set_size].to_numpy(), df.iloc[train_set_size:].to_numpy()
 
-def get_data_from_tmp(filename_suffix=''):
-    return pd.read_csv('frames/frame_train'+filename_suffix+'.tmp').to_numpy(), pd.read_csv('frames/frame_test'+filename_suffix+'.tmp').to_numpy(), 
+def get_saved_data_from(filename_suffix=''):
+    return pd.read_csv('frames/frame_train'+filename_suffix+'.dataframe').to_numpy(), pd.read_csv('frames/frame_test'+filename_suffix+'.dataframe').to_numpy(), 
 
+
+
+
+
+if __name__ == 'main':
+    print("Are you sure you want to re generate train and test dataframes from csv file (this may take a few hours)?")
+    print("Type 'YES' to confirm")
+    str = input()
+
+    if str == "YES":
+        print("re generating dataframes...")
+        exit(0)
+        for it in range(config.iters):
+            for f in config.train_set_fractions:
+                data_train_org, data_test_org = get_data(f*config.train_fraction,save_to_file=True, test_set_fraction=(1-config.train_fraction),filename_suffix=it+"_"+f)
+    else:
+        print('canceled')
