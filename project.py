@@ -8,7 +8,6 @@ import config
 import data_preparation
 from datetime import datetime
 
-np.random.seed(config.seed)
 #data_train_org, data_test_org = data_preparation.get_data(0.1,save_to_file=False, test_set_fraction=0.3)
 
 class Scaler:
@@ -246,11 +245,10 @@ class Gradient_Boosting_Regression:
         self.__dict__.update(newstate)
 
 class Random_Forest_Regression:
-    def __init__(self, n_trees, max_depth, bootstrap=True, max_features="half", alpha_prunning=0):
+    def __init__(self, n_trees, max_depth, bootstrap=True, max_features="half"):
         self.n_trees = n_trees
         self.max_depth = max_depth
         self.bootstrap = bootstrap
-        self.alpha_prunning = alpha_prunning
 
         if isinstance(max_features,int):
             self.n_features = lambda _ : max_features
@@ -307,104 +305,113 @@ def r2_score(y, y_pred):
     s2 = sum((y-y_pred)**2)
     return 1-s2/s1
 
-sns.set()
-kde_plots, legend_labels = [],[]
+def permutation_feature_importance(trained_model, X, y, iters):
+    score = mse(y, trained_model.predict(X))
+    feature_importance = np.array([0.]*X.shape[1])
+    for i in range(X.shape[1]):
+        for _ in range(iters):
+            Xcp = np.copy(X)
+            Xcp.T[i] = np.random.shuffle(Xcp.T[i])
+            feature_importance[i] += np.abs(score-mse(y, trained_model.predict(Xcp)))/iters #predict on matrix with shuffled column
+    return feature_importance / np.sum(feature_importance) 
 
-for model,name in (
-    (Gradient_Boosting_Regression(iters=100, max_tree_depth=4, eta=0.05, sample_fraction=0.6, loss="MSE"),"GB MSE"),
-    (Gradient_Boosting_Regression(iters=100, max_tree_depth=5, eta=0.05,sample_fraction=0.6, loss="ABS"),"GB ABS"),
-    (Gradient_Boosting_Regression(iters=100, max_tree_depth=5, eta=0.05, sample_fraction=0.6, loss="huber",huber_alpha_quantile=0.8),"GB huber"),
-    (LinearRegression(C=1),"LR linear"),
-    (LinearRegression(C=15000*10,kernel="polynomial",poly_degree=3,poly_const=1),"LR poly kernel"),
-    (LinearRegression(C=1,kernel="gaussian",gaussian_gamma=0.009), "LR gaussian kernel"),
-    (Decision_Tree_Regression(max_depth=8),"Decision tree"),
-    (Random_Forest_Regression(n_trees = 30,max_depth=8,bootstrap=True),"Random Forest"),):
-    
+if __name__ == '__main__':
+    np.random.seed(config.seed)
+    sns.set()
+    kde_plots, legend_labels = [],[]
 
-    train_mses, test_mses, test_abs_errs, r2s = [],[],[],[]
-    for train_set_fraction in config.train_set_fractions:
-        outliers_X = np.linspace(0,2,100)
-        train_mse, test_mse,test_abs, r2, outliers_Y = 0.,0.,0.,0.,np.zeros(len(outliers_X))
-        for it in range(config.iters):
-            data_train_org, data_test_org = data_preparation.get_saved_data_from(filename_suffix=str(it)+"_"+str(train_set_fraction))
-            data_train, data_test = np.copy(data_train_org), np.copy(data_test_org)
-    
-            np.random.shuffle(data_test)
-            data_val,data_test = data_test[:len(data_test)//2], data_test[len(data_test)//2:]
+    for model,name in (
+        (Gradient_Boosting_Regression(iters=100, max_tree_depth=4, eta=0.05, sample_fraction=0.6, loss="MSE"),"GB MSE"),
+        (Gradient_Boosting_Regression(iters=100, max_tree_depth=5, eta=0.05,sample_fraction=0.6, loss="ABS"),"GB ABS"),
+        (Gradient_Boosting_Regression(iters=100, max_tree_depth=5, eta=0.05, sample_fraction=0.6, loss="huber",huber_alpha_quantile=0.8),"GB huber"),
+        (LinearRegression(C=1),"LR linear"),
+        (LinearRegression(C=15000*10,kernel="polynomial",poly_degree=3,poly_const=1),"LR poly kernel"),
+        (LinearRegression(C=1,kernel="gaussian",gaussian_gamma=0.009), "LR gaussian kernel"),
+        (Decision_Tree_Regression(max_depth=8),"Decision tree"),
+        (Random_Forest_Regression(n_trees = 30,max_depth=8,bootstrap=True),"Random Forest"),):
+        
 
-            scaler = Scaler()
+        train_mses, test_mses, test_abs_errs, r2s = [],[],[],[]
+        for train_set_fraction in config.train_set_fractions:
+            outliers_X = np.linspace(0,2,100)
+            train_mse, test_mse,test_abs, r2, outliers_Y = 0.,0.,0.,0.,np.zeros(len(outliers_X))
+            for it in range(config.iters):
+                data_train_org, data_test_org = data_preparation.get_saved_data_from(filename_suffix=str(it)+"_"+str(train_set_fraction))
+                data_train, data_test = np.copy(data_train_org), np.copy(data_test_org)
+        
+                np.random.shuffle(data_test)
+                data_val,data_test = data_test[:len(data_test)//2], data_test[len(data_test)//2:]
 
-            data_train = scaler.fit_transform(data_train)
-            data_val  = scaler.transform(np.copy(data_val))
-            data_test  = scaler.transform(np.copy(data_test))
-            d_X_train = data_train[:,:-1]
-            d_y_train = data_train[:,-1]
+                scaler = Scaler()
 
-            d_X_test = data_test[:,:-1]
-            d_y_test = data_test[:,-1]
+                data_train = scaler.fit_transform(data_train)
+                data_val  = scaler.transform(np.copy(data_val))
+                data_test  = scaler.transform(np.copy(data_test))
 
-            d_X_val = data_val[:,:-1]
-            d_y_val = data_val[:,-1]
+                pickle.dump(scaler, open('models/scaler.p', "wb" ))
 
-            model.fit(d_X_train, d_y_train)
-            d_y_pred = model.predict(d_X_val)
-            d_y_pred_tr = model.predict(d_X_train)
+                d_X_train = data_train[:,:-1]
+                d_y_train = data_train[:,-1]
 
-            train_mse += mse(d_y_train, d_y_pred_tr)/config.iters
-            test_mse  += mse(d_y_val, d_y_pred)/config.iters
-            test_abs  += mean_abs_error(d_y_val, d_y_pred)/config.iters
+                d_X_test = data_test[:,:-1]
+                d_y_test = data_test[:,-1]
 
-            r2 += r2_score(d_y_val, d_y_pred)/config.iters
+                d_X_val = data_val[:,:-1]
+                d_y_val = data_val[:,-1]
+
+                model.fit(d_X_train, d_y_train)
+                d_y_pred = model.predict(d_X_test)
+                d_y_pred_tr = model.predict(d_X_train)
+
+                train_mse += mse(d_y_train, d_y_pred_tr)/config.iters
+                test_mse  += mse(d_y_test, d_y_pred)/config.iters
+                test_abs  += mean_abs_error(d_y_test, d_y_pred)/config.iters
+
+                r2 += r2_score(d_y_test, d_y_pred)/config.iters
+                if train_set_fraction == 1:
+                    outliers_Y += np.array([outliers_fraction(d_y_test, d_y_pred,x) for x in outliers_X])/config.iters
+                    if it == 0:
+                        plt.figure(1)
+                        if len(kde_plots) == 0:
+                            print("feature importances = ",permutation_feature_importance(model, d_X_test, d_y_test,iters=100))
+                            sns.histplot(data=scaler.inverse_transform_column(np.array(d_y_test),-1),stat="density",kde=True,bins=10,binrange=(0,10),color="lightgreen")
+                        kde_plots.append(sns.kdeplot(data=scaler.inverse_transform_column(np.array(d_y_pred),-1), palette=sns.color_palette()))     
+                        legend_labels.append(name)
+            
+
+            pickle.dump(model, open('models/'+name+'.p', "wb" ))
+            train_mses.append(train_mse)
+            test_mses.append(test_mse)
+            test_abs_errs.append(test_abs)
+            r2s.append(r2)
+
+            now = datetime.now()
+            current_time = now.strftime("%H:%M:%S")
+            print(current_time, train_set_fraction, 'MSE on train: %.2f, MSE on test: %.2f, ABS on test: %.2f, R2: %.2f' % (train_mse, test_mse, test_abs, r2))
+
             if train_set_fraction == 1:
-                outliers_Y += np.array([outliers_fraction(d_y_val, d_y_pred,x) for x in outliers_X])/config.iters
-                if it == 0:
-                    plt.figure(1)
-                    if len(kde_plots) == 0:
-                        sns.histplot(data=scaler.inverse_transform_column(np.array(d_y_val),-1),stat="density",kde=True,bins=10,binrange=(0,10),color="lightgreen")
-                    kde_plots.append(sns.kdeplot(data=scaler.inverse_transform_column(np.array(d_y_pred),-1), palette=sns.color_palette()))     
-                    legend_labels.append(name)
+                plt.figure(2)
+                plt.plot(outliers_X, outliers_Y)
 
+        plt.figure(3)
+        plt.plot(config.train_set_fractions, r2s)
 
-        pickle.dump(model, open('models/'+name+'.p', "wb" ))
-        train_mses.append(train_mse)
-        test_mses.append(test_mse)
-        test_abs_errs.append(test_abs)
-        r2s.append(r2)
+        plt.figure(4)
+        plt.plot(config.train_set_fractions, train_mses)
+        plt.figure(5)
+        plt.plot(config.train_set_fractions, test_mses)
+        plt.figure(6)
+        plt.plot(config.train_set_fractions, test_abs_errs)
 
-        now = datetime.now()
-        current_time = now.strftime("%H:%M:%S")
-        print(current_time, train_set_fraction, 'MSE on train: %.2f, MSE on test: %.2f, ABS on test: %.2f, R2: %.2f' % (train_mse, test_mse, test_abs, r2))
+    plt.figure(1)
+    plt.legend(labels=['y']+legend_labels)
 
-        #print(train_set_fraction,name,'MSE on train: %.2f' % train_mse)
-        #print(train_set_fraction,name,'MSE on test: %.2f' % test_mse)
-        #print(train_set_fraction,name,'ABS on test: %.2f' % test_abs)
-        #print(train_set_fraction,name,'R2: %.2f'     %
+    for i in range(2,7):
+        plt.figure(i)
+        plt.legend(labels=legend_labels)
 
+    for i in range(1,7):
+        plt.figure(i)
+        plt.savefig('plots/plot'+str(i)+'.png')
 
-
-        if train_set_fraction == 1:
-            plt.figure(2)
-            plt.plot(outliers_X, outliers_Y)
-
-    plt.figure(3)
-    plt.plot(config.train_set_fractions, r2s)
-
-    plt.figure(4)
-    plt.plot(config.train_set_fractions, train_mses)
-    plt.figure(5)
-    plt.plot(config.train_set_fractions, test_mses)
-    plt.figure(6)
-    plt.plot(config.train_set_fractions, test_abs_errs)
-
-"""plt.figure(1)
-plt.legend(labels=['y']+legend_labels)
-
-for i in range(2,7):
-    plt.figure(i)
-    plt.legend(labels=legend_labels)"""
-
-for i in range(1,7):
-    plt.figure(i)
-    plt.savefig('plots/plot'+str(i)+'.png',dpi=300)
-
-plt.show()
+    plt.show()

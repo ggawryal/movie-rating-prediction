@@ -7,6 +7,7 @@ import nltk
 from nltk.tokenize import word_tokenize
 from nltk.stem import PorterStemmer
 from string import punctuation
+import pickle
 
 import config
 
@@ -162,7 +163,7 @@ def get_data(train_set_fraction, save_to_file = False,filename_suffix='', test_s
     nltk.download('punkt')
     df['description'] = df['description'].apply(stem_description)
 
-    df = df.sample(frac=1) #shuffle
+    df = df.sample(frac=1,random_state=config.seed) #shuffle
     train_set_size = int(train_set_fraction*len(df))
 
     if test_set_fraction is not None and train_set_fraction + test_set_fraction < 1:
@@ -171,22 +172,28 @@ def get_data(train_set_fraction, save_to_file = False,filename_suffix='', test_s
     genre_encoder = One_Hot_Encoder()
     genre_encoder.fit(df.iloc[:train_set_size],'genre')
     df = genre_encoder.transform(df,'genre')
-
+    pickle.dump(genre_encoder, open('models/genre_encoder.p', 'wb' ))
 
     lang_encoder = Target_Encoder_K_Fold(alpha=10,k=5)
     df = lang_encoder.fit_transform_both(df,'language','avg_vote',train_set_size)
+    pickle.dump(lang_encoder, open('models/lang_encoder.p', 'wb' ))
 
     country_encoder = Target_Encoder_K_Fold(alpha=10,k=5)
     df = country_encoder.fit_transform_both(df,'country','avg_vote',train_set_size)
+    pickle.dump(country_encoder, open('models/country_encoder.p', 'wb' ))
 
     description_encoder = Target_Encoder_K_Fold(alpha=5,k=5,avg_func="max")
     df = description_encoder.fit_transform_both(df,'description','avg_vote',train_set_size)
+    pickle.dump(description_encoder, open('models/description_encoder.p', 'wb' ))
 
     director_encoder = Target_Encoder_Leave_Out1(alpha=10)
     df = director_encoder.fit_transform_both(df,'director','avg_vote', train_set_size)
+    pickle.dump(director_encoder, open('models/director_encoder.p', 'wb' ))
+
 
     actors_encoder = Target_Encoder_Leave_Out1(alpha=5)
     df = actors_encoder.fit_transform_both(df,'actors','avg_vote', train_set_size)
+    pickle.dump(actors_encoder, open('models/actors_encoder.p', 'wb' ))
 
 
     df['number_of_actors'] = df['actors'].str.count(',').add(1)
@@ -205,16 +212,15 @@ def get_saved_data_from(filename_suffix=''):
 
 
 
-if __name__ == 'main':
+if __name__ == '__main__':
     print("Are you sure you want to re generate train and test dataframes from csv file (this may take a few hours)?")
     print("Type 'YES' to confirm")
-    str = input()
+    txt = input()
 
-    if str == "YES":
+    if txt == "YES":
         print("re generating dataframes...")
-        exit(0)
         for it in range(config.iters):
             for f in config.train_set_fractions:
-                data_train_org, data_test_org = get_data(f*config.train_fraction,save_to_file=True, test_set_fraction=(1-config.train_fraction),filename_suffix=it+"_"+f)
+                data_train_org, data_test_org = get_data(f*config.train_fraction,save_to_file=True, test_set_fraction=(1-config.train_fraction),filename_suffix=str(it)+"__"+str(f))
     else:
         print('canceled')
