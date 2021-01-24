@@ -3,9 +3,10 @@ import math
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pickle
-
+import sys
 import config
 import data_preparation
+from datetime import datetime
 
 np.random.seed(config.seed)
 #data_train_org, data_test_org = data_preparation.get_data(0.1,save_to_file=False, test_set_fraction=0.3)
@@ -317,7 +318,7 @@ for model,name in (
     (LinearRegression(C=15000*10,kernel="polynomial",poly_degree=3,poly_const=1),"LR poly kernel"),
     (LinearRegression(C=1,kernel="gaussian",gaussian_gamma=0.009), "LR gaussian kernel"),
     (Decision_Tree_Regression(max_depth=8),"Decision tree"),
-    (Random_Forest_Regression(n_trees = 10,max_depth=8,bootstrap=True),"Random Forest"),):
+    (Random_Forest_Regression(n_trees = 30,max_depth=8,bootstrap=True),"Random Forest"),):
     
 
     train_mses, test_mses, test_abs_errs, r2s = [],[],[],[]
@@ -354,7 +355,7 @@ for model,name in (
             test_abs  += mean_abs_error(d_y_val, d_y_pred)/config.iters
 
             r2 += r2_score(d_y_val, d_y_pred)/config.iters
-            if train_set_fraction > 0:
+            if train_set_fraction == 1:
                 outliers_Y += np.array([outliers_fraction(d_y_val, d_y_pred,x) for x in outliers_X])/config.iters
                 if it == 0:
                     plt.figure(1)
@@ -369,14 +370,19 @@ for model,name in (
         test_mses.append(test_mse)
         test_abs_errs.append(test_abs)
         r2s.append(r2)
-        print(train_set_fraction,name,'MSE on train: %.2f' % train_mse)
-        print(train_set_fraction,name,'MSE on test: %.2f' % test_mse)
-        print(train_set_fraction,name,'ABS on test: %.2f' % test_abs)
-        print(train_set_fraction,name,'R2: %.2f'     % r2)
+
+        now = datetime.now()
+        current_time = now.strftime("%H:%M:%S")
+        print(current_time, train_set_fraction, 'MSE on train: %.2f, MSE on test: %.2f, ABS on test: %.2f, R2: %.2f' % (train_mse, test_mse, test_abs, r2))
+
+        #print(train_set_fraction,name,'MSE on train: %.2f' % train_mse)
+        #print(train_set_fraction,name,'MSE on test: %.2f' % test_mse)
+        #print(train_set_fraction,name,'ABS on test: %.2f' % test_abs)
+        #print(train_set_fraction,name,'R2: %.2f'     %
 
 
 
-        if train_set_fraction > 0:
+        if train_set_fraction == 1:
             plt.figure(2)
             plt.plot(outliers_X, outliers_Y)
 
