@@ -24,6 +24,9 @@ class Scaler:
     
     def transform(self, Xy):
         return np.array([(row - self.mean)/self.stddev for row in Xy])
+    
+    def tranform_without_y(self,X):
+        return np.array([(row - self.mean[:-1])/self.stddev[:-1] for row in X])
 
     def inverse_transform_column(self, col, i):
         return col*self.stddev[i]+self.mean[i] 

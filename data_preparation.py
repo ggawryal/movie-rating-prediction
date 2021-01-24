@@ -25,6 +25,8 @@ def move_column_to_end(df, col):
 def parse_currency(s):
     if not isinstance(s, str):
         return None
+    if s.isnumeric():
+        return int(s)
     currency_converter = {'$': 1., 'EUR': 1.23, 'INR': 0.014 , 'GBP': 1.36, 'CAD': 0.79, 'PLN': 0.27} #exchange rates from day 7.01.2021
     for name ,v in currency_converter.items():
         if name in s:
@@ -115,6 +117,9 @@ class Target_Encoder_Leave_Out1:
         df_test =  self.cms.transform_test(df_test,col,'_target')
         return pd.concat((df_train, df_test))
 
+    def transform(self, df, col):
+        return self.cms.transform_test(df,col,'_target')
+
 class Target_Encoder_K_Fold:
     def __init__(self, alpha,k, avg_func="mean"):
         self.alpha = alpha
@@ -148,11 +153,29 @@ class Target_Encoder_K_Fold:
         df_train = self.fit_transform_train(df_train,col,y)
         df_test =  self.cms.transform_test(df_test,col,'_k_folds_target')
         return pd.concat((df_train, df_test))
-        
+    
+    def transform(self, df, col):
+        return self.cms.transform_test(df,col,'_k_folds_target')
 
 def stem_description(text):
     ps = PorterStemmer()
     return ', '.join(filter(lambda x : len(x) >= 4, set(re.sub(r'[^a-z]', '', ps.stem(word.lower())) for word in word_tokenize(text))))
+
+def transform_test(df):
+    #df = df['year','actors','director','genre','duration','country','language','budget','description'].dropna()
+    df['year'] = df['year'].apply(pd.to_numeric, errors='coerce').dropna().astype(int)
+    df['budget'] = df['budget'].apply(parse_currency)
+    df = df[df['budget'].notnull()]
+    nltk.download('punkt')
+    df['description'] = df['description'].apply(stem_description)
+
+    for x in ['genre','language','country','description','director','actors']:
+        encoder = pickle.load(open('models/'+x+'_encoder.p', 'rb' ))
+        df = encoder.transform(df,x)
+
+    df['number_of_actors'] = df['actors'].str.count(',').add(1)
+    df = df.drop(columns=['description', 'actors', 'director','genre','language','country'])
+    return df.to_numpy()
 
 def get_data(train_set_fraction, save_to_file = False,filename_suffix='', test_set_fraction = None):
     df = pd.read_csv("data/IMDB movies.csv")[['year','actors','director','genre','duration','country','language','budget','avg_vote','description']].dropna()
@@ -176,7 +199,7 @@ def get_data(train_set_fraction, save_to_file = False,filename_suffix='', test_s
 
     lang_encoder = Target_Encoder_K_Fold(alpha=10,k=5)
     df = lang_encoder.fit_transform_both(df,'language','avg_vote',train_set_size)
-    pickle.dump(lang_encoder, open('models/lang_encoder.p', 'wb' ))
+    pickle.dump(lang_encoder, open('models/language_encoder.p', 'wb' ))
 
     country_encoder = Target_Encoder_K_Fold(alpha=10,k=5)
     df = country_encoder.fit_transform_both(df,'country','avg_vote',train_set_size)
@@ -221,6 +244,6 @@ if __name__ == '__main__':
         print("re generating dataframes...")
         for it in range(config.iters):
             for f in config.train_set_fractions:
-                data_train_org, data_test_org = get_data(f*config.train_fraction,save_to_file=True, test_set_fraction=(1-config.train_fraction),filename_suffix=str(it)+"__"+str(f))
+                data_train_org, data_test_org = get_data(f*config.train_fraction,save_to_file=True, test_set_fraction=(1-config.train_fraction),filename_suffix=str(it)+"_"+str(f))
     else:
         print('canceled')
