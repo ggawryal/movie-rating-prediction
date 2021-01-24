@@ -1,1 +1,1 @@
-# Into this directory lands all generated plots
+Into this directory lands all generated plots
