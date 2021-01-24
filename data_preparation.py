@@ -162,7 +162,6 @@ def stem_description(text):
     return ', '.join(filter(lambda x : len(x) >= 4, set(re.sub(r'[^a-z]', '', ps.stem(word.lower())) for word in word_tokenize(text))))
 
 def transform_test(df):
-    #df = df['year','actors','director','genre','duration','country','language','budget','description'].dropna()
     df['year'] = df['year'].apply(pd.to_numeric, errors='coerce').dropna().astype(int)
     df['budget'] = df['budget'].apply(parse_currency)
     df = df[df['budget'].notnull()]
@@ -178,7 +177,7 @@ def transform_test(df):
     return df.to_numpy()
 
 def get_data(train_set_fraction, save_to_file = False,filename_suffix='', test_set_fraction = None):
-    df = pd.read_csv("data/IMDB movies.csv")[['year','actors','director','genre','duration','country','language','budget','avg_vote','description']].dropna()
+    df = pd.read_csv("data/IMDb movies.csv")[['year','actors','director','genre','duration','country','language','budget','avg_vote','description']].dropna()
     df['year'] = df['year'].apply(pd.to_numeric, errors='coerce').dropna().astype(int)
     df['budget'] = df['budget'].apply(parse_currency)
     df = df[df['budget'].notnull()]
